@@ -146,7 +146,7 @@ li input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:n
     if(!cloud.ref) return;
     setStatus('Saving…'); clearTimeout(cloud.t);
     cloud.t=setTimeout(function(){
-      cloud.ref.set({tasks:tasks,cats:catList,ts:stamp()}).then(function(){ setStatus('☁ Saved to your account'); })
+      cloud.ref.set({tasks:tasks,cats:catList,ts:stamp()}).then(function(){ setStatus('☁ Saved for everyone'); })
         .catch(function(){ setStatus('Cloud save failed — saved on this device'); });
     },700);
   }
@@ -346,22 +346,35 @@ li input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent);flex:n
   if(!tasks.length&&!seeded){ tasks=sampleTasks(); try{ localStorage.setItem(KEY,JSON.stringify(tasks)); localStorage.setItem('tasks.seeded','1'); }catch(e){} }
   render();
 
-  // Account storage (db capability): private per person, newest copy wins. Falls back to this device only.
+  // Shared cloud storage (Firebase Firestore): everyone who opens the site sees the same tasks, live.
+  var FIREBASE_CONFIG={
+    apiKey:"AIzaSyByduk12o7GfTGEFLBrbrovjktT8BiQqSw",
+    authDomain:"task-manager-719f9.firebaseapp.com",
+    projectId:"task-manager-719f9",
+    appId:"1:68566662398:web:27223c57cb3d770f4779af"
+  };
   (async function(){
     try{
-      if(!window.claude||!window.claude.use) return;
-      var db=await window.claude.use('db'), user=await window.claude.use('user');
-      if(!db||!user) return;
-      var id=await user.id(); if(!id) return;
-      cloud.ref=db.doc('data/users/'+id+'/app');
-      var snap=await cloud.ref.get(), d=snap.exists?snap.data():null;
-      if(d&&Array.isArray(d.tasks)&&(d.ts||0)>stamp()){
-        tasks=d.tasks; if(Array.isArray(d.cats)) catList=d.cats;
-        try{ localStorage.setItem(KEY,JSON.stringify(tasks)); localStorage.setItem('tasks.cats',JSON.stringify(catList)); localStorage.setItem('tasks.seeded','1'); localStorage.setItem('tasks.ts',String(d.ts)); }catch(e){}
-        render(); setStatus('☁ Loaded from your account');
-      }else{
-        cloudPush();
-      }
+      if(FIREBASE_CONFIG.apiKey.indexOf('PASTE')===0){ setStatus('Saved on this device (cloud not set up yet)'); return; }
+      var B='https://www.gstatic.com/firebasejs/10.12.2/';
+      var A=await import(B+'firebase-app.js'), F=await import(B+'firebase-firestore.js');
+      var ref=F.doc(F.getFirestore(A.initializeApp(FIREBASE_CONFIG)),'shared','tasks');
+      cloud.ref={set:function(d){ return F.setDoc(ref,d); }};
+      var first=true;
+      F.onSnapshot(ref,function(snap){
+        if(snap.metadata.hasPendingWrites) return;
+        var d=snap.exists()?snap.data():null;
+        if(d&&Array.isArray(d.tasks)&&(d.ts||0)>stamp()){
+          tasks=d.tasks; if(Array.isArray(d.cats)) catList=d.cats;
+          try{ localStorage.setItem(KEY,JSON.stringify(tasks)); localStorage.setItem('tasks.cats',JSON.stringify(catList)); localStorage.setItem('tasks.seeded','1'); localStorage.setItem('tasks.ts',String(d.ts)); }catch(e){}
+          render(); setStatus('☁ Synced with everyone');
+        }else if(first&&(!d||(d.ts||0)<stamp())){
+          cloudPush();
+        }else{
+          setStatus('☁ Synced with everyone');
+        }
+        first=false;
+      },function(){ setStatus('Cloud connection failed — saved on this device'); });
     }catch(e){ setStatus('Saved on this device'); }
   })();
 })();
